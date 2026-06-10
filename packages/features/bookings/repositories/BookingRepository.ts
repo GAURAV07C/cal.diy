@@ -1,3 +1,5 @@
+import dayjs from "@calcom/dayjs";
+import { getDefinedBufferTimes } from "@calcom/features/eventtypes/lib/getDefinedBufferTimes";
 import { withReporting } from "@calcom/lib/sentryWrapper";
 import type { PrismaClient } from "@calcom/prisma";
 import type { Booking, Prisma } from "@calcom/prisma/client";
@@ -74,7 +76,6 @@ export type ManagedEventCancellationResult = {
   metadata: Prisma.JsonValue;
   status: BookingStatus;
 };
-
 
 type TeamBookingsParamsBase = {
   user: { id: number; email: string };
@@ -696,9 +697,14 @@ export class BookingRepository implements IBookingRepository {
     seatedEvent?: boolean;
     userIdAndEmailMap: Map<number, string>;
   }) {
+    const definedBufferTimes = getDefinedBufferTimes();
+    const maxBuffer = definedBufferTimes[definedBufferTimes.length - 1];
+    const startTimeAdjustedWithMaxBuffer = dayjs(startDate).subtract(maxBuffer, "minute").toDate();
+    const endTimeAdjustedWithMaxBuffer = dayjs(endDate).add(maxBuffer, "minute").toDate();
+
     const sharedQuery = {
-      startTime: { lte: endDate },
-      endTime: { gte: startDate },
+      startTime: { lte: endTimeAdjustedWithMaxBuffer },
+      endTime: { gte: startTimeAdjustedWithMaxBuffer },
       status: {
         in: [BookingStatus.ACCEPTED],
       },
@@ -761,8 +767,8 @@ export class BookingRepository implements IBookingRepository {
     const currentBookingsAllUsersQueryThree = eventTypeId
       ? this.prismaClient.booking.findMany({
           where: {
-            startTime: { lte: endDate },
-            endTime: { gte: startDate },
+            startTime: { lte: endTimeAdjustedWithMaxBuffer },
+            endTime: { gte: startTimeAdjustedWithMaxBuffer },
             eventType: {
               id: eventTypeId,
               requiresConfirmation: true,
