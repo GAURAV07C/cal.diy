@@ -1,3 +1,4 @@
+import dayjs from "@calcom/dayjs";
 import {
   CalendarStoreContext,
   createCalendarStore,
@@ -5,7 +6,7 @@ import {
 } from "@calcom/features/calendars/weeklyview/state/store";
 import classNames from "@calcom/ui/classNames";
 import type React from "react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "@calcom/features/calendars/weeklyview/styles/styles.css";
 import type { CalendarComponentProps } from "@calcom/features/calendars/weeklyview/types/state";
 import { getDaysBetweenDates, getHoursToDisplay } from "@calcom/features/calendars/weeklyview/utils";
@@ -40,6 +41,26 @@ function CalendarInner(props: CalendarComponentProps) {
   const scrollToCurrentTime = useCalendarStore((state) => state.scrollToCurrentTime ?? true);
   const updateCurrentTimeOnFocus = useCalendarStore((state) => state.updateCurrentTimeOnFocus ?? false);
 
+  const firstAvailableSlot = useMemo(() => {
+    if (!availableTimeslots || Object.keys(availableTimeslots).length === 0) return null;
+    let earliestTime: number | null = null;
+    for (const day in availableTimeslots) {
+      const slots = availableTimeslots[day];
+      if (slots && slots.length > 0) {
+        const earliestInDay = Math.min(
+          ...slots.map((slot) => {
+            const time = dayjs(slot.start).tz(timezone);
+            return time.hour() * 60 + time.minute();
+          })
+        );
+        if (earliestTime === null || earliestInDay < earliestTime) {
+          earliestTime = earliestInDay;
+        }
+      }
+    }
+    return earliestTime;
+  }, [availableTimeslots, timezone]);
+
   const days = useMemo(() => getDaysBetweenDates(startDate, endDate), [startDate, endDate]);
 
   const hours = useMemo(
@@ -49,10 +70,26 @@ function CalendarInner(props: CalendarComponentProps) {
   const numberOfGridStopsPerDay = hours.length * usersCellsStopsPerHour;
   const hourSize = 58;
 
+  const [hasScrolledToAvailableSlot, setHasScrolledToAvailableSlot] = useState(false);
+
+  const dummyScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (firstAvailableSlot !== null && dummyScrollRef.current && !hasScrolledToAvailableSlot) {
+      setTimeout(() => {
+        dummyScrollRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+        setHasScrolledToAvailableSlot(true);
+      }, 100);
+    }
+  }, [firstAvailableSlot, hasScrolledToAvailableSlot]);
+
   // Initalise State on initial mount and when props change
   useEffect(() => {
     initialState(props);
   }, [props, initialState]);
+
+  const hasAvailableTimeslots = availableTimeslots && Object.keys(availableTimeslots).length > 0;
+  const shouldScrollToCurrentTime = scrollToCurrentTime && !hasAvailableTimeslots;
 
   return (
     <MobileNotSupported>
@@ -81,9 +118,19 @@ function CalendarInner(props: CalendarComponentProps) {
             <div className="relative flex flex-auto">
               <CurrentTime
                 timezone={timezone}
-                scrollToCurrentTime={scrollToCurrentTime}
+                scrollToCurrentTime={shouldScrollToCurrentTime}
                 updateOnFocus={updateCurrentTimeOnFocus}
               />
+              {firstAvailableSlot !== null && (
+                <div
+                  ref={dummyScrollRef}
+                  style={{
+                    position: "absolute",
+                    top: `calc(${Math.max(0, firstAvailableSlot - startHour * 60 - 150)} * var(--one-minute-height) + var(--calendar-offset-top))`,
+                    visibility: "hidden",
+                  }}
+                />
+              )}
               <div
                 className={classNames(
                   "bg-default dark:bg-cal-muted ring-muted sticky left-0 z-10 w-16 flex-none ring-1",
