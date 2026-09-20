@@ -52,7 +52,8 @@ describe.skip("(skipped) Tests for Button component", () => {
 
   test("Should apply the fab variant class", () => {
     render(<Button variant="fab">Test Button</Button>);
-    expect(screen.getByText("Test Button")).toHaveClass("hidden md:inline");
+    // The fab text is hidden on mobile but rendered in a hidden div
+    expect(screen.getByText("Test Button")).toHaveClass("hidden md:inline-flex");
   });
 
   test("Should apply the secondary color class", () => {
