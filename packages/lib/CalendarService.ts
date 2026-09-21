@@ -745,23 +745,16 @@ export default abstract class BaseCalendarService implements Calendar {
 
           const start = dayjs(dateFrom);
           const end = dayjs(dateTo);
-          const startDate = ICAL.Time.fromDateTimeString(startISOString);
-          startDate.hour = event.startDate.hour;
-          startDate.minute = event.startDate.minute;
-          startDate.second = event.startDate.second;
-          const iterator = event.iterator(startDate);
+          const iterator = event.iterator();
           let current: ICAL.Time;
           let currentEvent: ReturnType<typeof event.getOccurrenceDetails> | undefined;
           let currentStart: ReturnType<typeof dayjs> | null = null;
           let currentError: string | undefined;
 
-          while (
-            maxIterations > 0 &&
-            (currentStart === null || currentStart.isAfter(end) === false) &&
-            // this iterator was poorly implemented, normally done is expected to be
-            // returned
-            (current = iterator.next())
-          ) {
+          // Safely allows fast-forwarding >130 years of daily events
+          maxIterations = 50000;
+
+          while (maxIterations > 0 && (current = iterator.next())) {
             maxIterations -= 1;
 
             try {
@@ -773,7 +766,8 @@ export default abstract class BaseCalendarService implements Calendar {
                 this.log.error("error", error);
               }
             }
-            if (!currentEvent) return;
+            if (!currentEvent) continue;
+
             // do not mix up caldav and icalendar! For the recurring events here, the timezone
             // provided is relevant, not as pointed out in https://datatracker.ietf.org/doc/html/rfc4791#section-9.6.5
             // where recurring events are always in utc (in caldav!). Thus, apply the time zone here.
@@ -783,16 +777,26 @@ export default abstract class BaseCalendarService implements Calendar {
               currentEvent.endDate = currentEvent.endDate.convertToZone(zone);
             }
             currentStart = dayjs(currentEvent.startDate.toJSDate());
+            const currentEnd = dayjs(currentEvent.endDate.toJSDate());
 
-            if (currentStart.isBetween(start, end) === true) {
-              events.push({
-                start: currentStart.toISOString(),
-                end: dayjs(currentEvent.endDate.toJSDate()).toISOString(),
-              });
+            // Fast-forward: If occurrence ended before query window, skip it
+            if (!currentEnd.isAfter(start)) {
+              continue;
             }
+
+            // Stop evaluation: If occurrence starts after query window ends, we are done
+            if (!currentStart.isBefore(end)) {
+              break;
+            }
+
+            // Overlaps the query window! Add it.
+            events.push({
+              start: currentStart.toISOString(),
+              end: currentEnd.toISOString(),
+            });
           }
           if (maxIterations <= 0) {
-            logger.warn("Could not find any occurrence for recurring event in 365 iterations");
+            logger.warn("Could not find any occurrence for recurring event in 50000 iterations");
           }
           return;
         }
